@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: powerade-mundial
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://powerade_db_user:ZbT9GxkFaqzMuljepxWscrVCI09qypl5@dpg-d7p8hvv7f7vs73c6isu0-a.oregon-postgres.render.com/powerade_db
+      - key: CLOUDINARY_CLOUD_NAME
+        value: detpzvq6p
+      - key: CLOUDINARY_API_KEY
+        value: "761676471924124"
+      - key: CLOUDINARY_API_SECRET
+        value: fzaDhIaR_bpYJEPJRzwiZTKubPM
+      - key: ADMIN_PASSWORD
+        value: admin2026
+      - key: NODE_ENV
+        value: production
