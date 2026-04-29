@@ -1,0 +1,75 @@
+const express = require('express');
+const router = express.Router();
+const { pool } = require('../db');
+function authAdmin(req, res, next) {
+  const pass = req.headers['x-admin-password'] || req.body?.password;
+  if (pass !== process.env.ADMIN_PASSWORD) return res.status(401).json({ error: 'No autorizado' });
+  next();
+}
+router.get('/fases', authAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT f.*, json_agg(p ORDER BY p.orden) FILTER (WHERE p.id IS NOT NULL) as partidos FROM fases f LEFT JOIN partidos p ON p.fase_id = f.id GROUP BY f.id ORDER BY f.fecha_creacion");
+    res.json({ fases: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/fases', authAdmin, async (req, res) => {
+  const { nombre, partidos } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE fases SET activa=false, cerrada=true WHERE activa=true AND cerrada=false');
+    const fase_id = 'fase_' + Date.now();
+    await client.query('INSERT INTO fases (id, nombre, activa, cerrada) VALUES ($1,$2,true,false)', [fase_id, nombre]);
+    for (let i = 0; i < partidos.length; i++) {
+      const p = partidos[i];
+      await client.query('INSERT INTO partidos (id, fase_id, equipo_a, equipo_b, fecha, orden) VALUES ($1,$2,$3,$4,$5,$6)', ['p_'+Date.now()+'_'+i, fase_id, p.equipoA, p.equipoB, p.fecha||'', i]);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, fase_id });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+router.put('/partidos/:id/resultado', authAdmin, async (req, res) => {
+  const { resultado } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE partidos SET resultado=$1 WHERE id=$2', [resultado, req.params.id]);
+    await client.query('UPDATE apuestas SET puntos=0 WHERE partido_id=$1', [req.params.id]);
+    await client.query('UPDATE apuestas SET puntos=1 WHERE partido_id=$1 AND prediccion=$2', [req.params.id, resultado]);
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+router.put('/fases/:id', authAdmin, async (req, res) => {
+  const { accion } = req.body;
+  try {
+    if (accion === 'cerrar') await pool.query('UPDATE fases SET activa=false, cerrada=true WHERE id=$1', [req.params.id]);
+    else if (accion === 'activar') { await pool.query('UPDATE fases SET activa=false, cerrada=true WHERE activa=true'); await pool.query('UPDATE fases SET activa=true, cerrada=false WHERE id=$1', [req.params.id]); }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.delete('/fases/:id', authAdmin, async (req, res) => {
+  try { await pool.query('DELETE FROM fases WHERE id=$1', [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.get('/participantes', authAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query("SELECT p.*, COALESCE(SUM(a.puntos),0) as puntos, COUNT(DISTINCT b.fase_id) as boletas FROM participantes p LEFT JOIN apuestas a ON a.dni=p.dni LEFT JOIN boletas b ON b.dni=p.dni GROUP BY p.dni ORDER BY puntos DESC");
+    res.json({ participantes: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.get('/stats', authAdmin, async (req, res) => {
+  try {
+    const [a,b,c,d,e] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM participantes'),
+      pool.query('SELECT COUNT(*) FROM fases'),
+      pool.query('SELECT COUNT(*) FROM boletas'),
+      pool.query('SELECT COUNT(*) FROM partidos WHERE resultado IS NOT NULL'),
+      pool.query('SELECT nombre FROM fases WHERE activa=true AND cerrada=false LIMIT 1')
+    ]);
+    res.json({ participantes: +a.rows[0].count, fases: +b.rows[0].count, boletas: +c.rows[0].count, resultados: +d.rows[0].count, fase_activa: e.rows[0]?.nombre||null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+module.exports = router;
