@@ -231,6 +231,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="atab" onclick="adminTab('resultados')">Resultados</button>
       <button class="atab" onclick="adminTab('participantes')">Participantes</button>
       <button class="atab" onclick="adminTab('ranking')">Ranking</button>
+      <button class="atab" onclick="adminTab('verificacion')">Verificación</button>
     </div>
     <button class="a-btn gray" onclick="showView('totem');initTotem()" style="font-size:12px">← Tótem</button>
   </div>
@@ -330,6 +331,19 @@ tr:hover td{background:rgba(255,255,255,.02)}
     </div>
   </div>
 </div>
+
+  <!-- VERIFICACIÓN -->
+  <div id="sec-verificacion" class="admin-section">
+    <div class="admin-body">
+      <div class="card">
+        <div class="card-title">Verificación de boletas
+          <span style="color:var(--mut);font-size:12px;font-weight:400;margin-left:8px">Revisa foto y número para validar compra de Powerade</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="verif-filtros"></div>
+        <div id="verif-list"></div>
+      </div>
+    </div>
+  </div>
 
 <div class="success-toast" id="toast"></div>
 
@@ -468,12 +482,12 @@ function toast(msg){
 // ══════════════════════════════════════════════════════════════════════════
 async function adminTab(tab){
   document.querySelectorAll('.atab').forEach(function(b,i){
-    b.classList.toggle('act',['dashboard','fases','resultados','participantes','ranking'][i]===tab);
+    b.classList.toggle('act',['dashboard','fases','resultados','participantes','ranking','verificacion'][i]===tab);
   });
   document.querySelectorAll('.admin-section').forEach(function(s){s.classList.remove('act');});
   document.getElementById('sec-'+tab).classList.add('act');
   await loadFasesFromAPI();
-  if(tab==='participantes'||tab==='ranking') await loadPartsFromAPI();
+  if(tab==='participantes'||tab==='ranking'||tab==='verificacion') await loadPartsFromAPI();
   renderAdmin(tab);
 }
 
@@ -484,6 +498,7 @@ function renderAdmin(tab){
   if(t==='resultados') renderResultados();
   if(t==='participantes') renderParticipantes();
   if(t==='ranking') renderRankingAdmin();
+  if(t==='verificacion') renderVerificacion();
 }
 
 // ── DASHBOARD
@@ -876,7 +891,7 @@ async function initTotem(){
   renderTotem();
 }
 
-function goT(s){ T.screen=s; T.err=''; if(s==='inicio'||s==='boleta'){T.fotoOk=false;T.fotoData=null;} renderTotem(); }
+function goT(s){ T.screen=s; T.err=''; if(s==='inicio'){T.fotoOk=false;T.fotoData=null;} renderTotem(); }
 
 function renderTotem(){
   var fns = {
@@ -1137,8 +1152,7 @@ function tReingreso(){
     +(found?'<div class="info-ok" style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">✓</span><div><b>Cuenta encontrada</b><div class="sub">'+found.nombre+' · '+calcPts(found)+' pts acumulados</div></div></div>':'')
     +(T.err?'<div class="err-msg">'+T.err+'</div>':'')
     +(T.notFound?'<div class="btn-r" onclick="tStartNuevo()">Participar — primera vez →</div>':'<div class="btn-r" onclick="tReingresoLookup()">Buscar cuenta</div>')
-    +(found?'<div><div class="lbl">Número de boleta — '+fase.nombre+'</div><input class="fld-input" id="t-boleta-rein" value="'+T.boleta+'" placeholder="B-2026-XXXXXX" oninput="T.boleta=this.value"></div>':'')
-    +(found?'<div class="row-btns"><div class="btn-r" style="flex:1" onclick="tReingresoNext()">Ir a apuestas →</div><div class="btn-g" style="flex:0 0 70px" onclick="goT(\'inicio\')">Inicio</div></div>':'')
+    +(found?'<div class="row-btns"><div class="btn-r" style="flex:1" onclick="tReingresoNext()">Continuar →</div><div class="btn-g" style="flex:0 0 70px" onclick="goT(\'inicio\')">Inicio</div></div>':'')
     +'</div>';
 }
 
@@ -1158,20 +1172,17 @@ async function tReingresoLookup(){
     var boletas = found.boletas || [];
     var yaApostó = boletas.find(function(b){return b.fase_id===T.faseId;});
     if(yaApostó){T.err='Ya registraste una boleta en esta fase';renderTotem();return;}
-    T.nombre=found.nombre; T.tel=found.tel||''; T.correo=found.correo||''; T.isNew=false; T.err='';
-    renderTotem();
+    T.nombre=found.nombre; T.tel=found.telefono||found.tel||''; T.correo=found.correo||''; T.isNew=false; T.err='';
+    T.boleta=''; T.fotoOk=false; T.fotoData=null; T.picks={};
+    goT('boleta');
   } catch(e){
     T.err='Error al buscar: '+e.message; renderTotem();
   }
 }
 
 function tReingresoNext(){
-  T.boleta=(document.getElementById('t-boleta-rein')||{}).value||T.boleta;
-  if(!T.boleta.trim()){T.err='Ingresa el número de boleta';renderTotem();return;}
-  var parts=getParts();
-  var usada=parts.find(function(p){return p.boletas&&p.boletas.find(function(b){return b.numero===T.boleta.trim()&&b.fase_id===T.faseId;});});
-  if(usada){T.err='Esta boleta ya fue registrada';renderTotem();return;}
-  T.boleta=T.boleta.trim(); T.err=''; T.picks={}; goT('apuestas');
+  T.boleta=''; T.fotoOk=false; T.fotoData=null; T.picks={}; T.err='';
+  goT('boleta');
 }
 
 function poweradeLogo(){
@@ -1265,6 +1276,63 @@ var CRUCES_16AVOS = [
   ['🇫🇷 Francia','🇲🇦 Marruecos'],['🇪🇸 España','🇧🇪 Bélgica'],
   ['🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra','🇰🇷 Corea del Sur'],['🇵🇹 Portugal','🇹🇳 Túnez'],
 ];
+
+
+// ── VERIFICACIÓN DE BOLETAS
+var _verifFiltro = 'todas';
+function renderVerificacion(){
+  var parts=getParts();
+  var boletas=[];
+  parts.forEach(function(p){
+    var bs=p.boletas||[];
+    bs.forEach(function(b){
+      boletas.push({part:p,numero:b.numero||'—',fase_id:b.fase_id||'',foto:b.foto||null,fecha:b.fecha||0,estado:b.estado||'pendiente'});
+    });
+  });
+  boletas.sort(function(a,b){return b.fecha-a.fecha;});
+  var fases=getFases();
+  var filtroH='<button class="fs-btn '+(_verifFiltro==='todas'?'act':'')+'" onclick="_verifFiltro=\'todas\';renderVerificacion()">Todas ('+boletas.length+')</button>';
+  fases.forEach(function(f){
+    var cnt=boletas.filter(function(b){return b.fase_id===f.id;}).length;
+    filtroH+='<button class="fs-btn '+(_verifFiltro===f.id?'act':'')+'" onclick="_verifFiltro=\''+f.id+'\';renderVerificacion()">'+f.nombre+' ('+cnt+')</button>';
+  });
+  filtroH+='<button class="fs-btn '+(_verifFiltro==='pendiente'?'act':'')+'" onclick="_verifFiltro=\'pendiente\';renderVerificacion()" style="color:var(--gold)">⏳ Pendientes</button>';
+  filtroH+='<button class="fs-btn '+(_verifFiltro==='aprobada'?'act':'')+'" onclick="_verifFiltro=\'aprobada\';renderVerificacion()" style="color:var(--green)">✓ Aprobadas</button>';
+  filtroH+='<button class="fs-btn '+(_verifFiltro==='rechazada'?'act':'')+'" onclick="_verifFiltro=\'rechazada\';renderVerificacion()" style="color:#ff6666">✗ Rechazadas</button>';
+  document.getElementById('verif-filtros').innerHTML=filtroH;
+  var fil=boletas;
+  if(_verifFiltro==='pendiente') fil=boletas.filter(function(b){return b.estado==='pendiente';});
+  else if(_verifFiltro==='aprobada') fil=boletas.filter(function(b){return b.estado==='aprobada';});
+  else if(_verifFiltro==='rechazada') fil=boletas.filter(function(b){return b.estado==='rechazada';});
+  else if(_verifFiltro!=='todas') fil=boletas.filter(function(b){return b.fase_id===_verifFiltro;});
+  if(!fil.length){document.getElementById('verif-list').innerHTML='<div class="warn-box">No hay boletas en este filtro.</div>';return;}
+  var h='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">';
+  fil.forEach(function(b){
+    var ec=b.estado==='aprobada'?'var(--green)':b.estado==='rechazada'?'#ff6666':'var(--gold)';
+    var el=b.estado==='aprobada'?'✓ APROBADA':b.estado==='rechazada'?'✗ RECHAZADA':'⏳ PENDIENTE';
+    var fn=(getFases().find(function(f){return f.id===b.fase_id;})||{nombre:b.fase_id}).nombre;
+    h+='<div style="background:var(--s2);border-radius:12px;border:1px solid var(--bdr);overflow:hidden">';
+    if(b.foto) h+='<img src="'+b.foto+'" style="width:100%;height:150px;object-fit:cover;display:block;cursor:pointer" onclick="window.open(\''+b.foto+'\',\'_blank\')">';
+    else h+='<div style="width:100%;height:80px;background:var(--s1);display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:11px;font-family:\'Barlow Condensed\'">SIN FOTO</div>';
+    h+='<div style="padding:12px">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-family:\'Barlow Condensed\';font-size:15px;font-weight:700;color:#fff">'+b.numero+'</div><div style="font-size:10px;font-weight:700;color:'+ec+'">'+el+'</div></div>';
+    h+='<div style="font-size:12px;color:var(--mut);margin-bottom:2px">'+b.part.nombre+'</div>';
+    h+='<div style="font-size:11px;color:var(--dim);margin-bottom:10px">DNI: '+b.part.dni+' · '+fn+'</div>';
+    if(b.estado!=='aprobada') h+='<button class="a-btn green" style="width:100%;margin-bottom:5px;font-size:11px;padding:7px" onclick="verificarBoleta(\''+b.part.dni+'\',\''+b.numero+'\',\'aprobada\')">✓ Aprobar</button>';
+    if(b.estado!=='rechazada') h+='<button class="a-btn gray" style="width:100%;font-size:11px;padding:7px;color:#ff6666" onclick="verificarBoleta(\''+b.part.dni+'\',\''+b.numero+'\',\'rechazada\')">✗ Rechazar</button>';
+    if(b.estado!=='pendiente') h+='<button class="a-btn gray" style="width:100%;font-size:11px;padding:7px;margin-top:4px" onclick="verificarBoleta(\''+b.part.dni+'\',\''+b.numero+'\',\'pendiente\')">↩ Restablecer</button>';
+    h+='</div></div>';
+  });
+  h+='</div>';
+  document.getElementById('verif-list').innerHTML=h;
+}
+async function verificarBoleta(dni,num,estado){
+  try{
+    var res=await apiFetch('/admin/verificar-boleta',{method:'POST',body:JSON.stringify({dni:dni,numeroBoleta:num,estado:estado})});
+    if(res.error) throw new Error(res.error);
+    await loadPartsFromAPI(); toast('✓ Boleta '+num+' → '+estado); renderVerificacion();
+  }catch(e){toast('❌ '+e.message);}
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // INIT
