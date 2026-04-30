@@ -953,7 +953,7 @@ async function tStartReingreso(){
   } catch(e){ _fasesCache = []; }
   var fa=getFaseActiva();
   if(!fa){T.err='No hay fase activa';renderTotem();return;}
-  T.faseId=fa.id; T.picks={}; T.boleta=''; T.notFound=false; goT('reingreso');
+  T.faseId=fa.id; T.picks={}; T.boleta=''; T.notFound=false; T.foundAccount=false; T.foundNombre=''; goT('reingreso');
 }
 
 function tBoleta(){
@@ -1144,7 +1144,7 @@ function tRanking(){
 function tReingreso(){
   var fase=getFases().find(function(f){return f.id===T.faseId;})||getFaseActiva()||{nombre:'—',id:null};
   T.faseId=fase.id;
-  var found=T.dni?getParts().find(function(p){return p.dni===T.dni;}):null;
+  var found=T.foundAccount?{nombre:T.foundNombre}:(T.dni?getParts().find(function(p){return p.dni===T.dni;}):null);
   return '<div class="topbar"><div class="brand">'+(fase.nombre?fase.nombre.toUpperCase():'')+' — REINGRESO</div><div class="logo">Bienvenido</div></div>'
     +'<div class="body">'+ppDots()
     +'<div class="sub">Ingresa tu DNI para recuperar tu cuenta y registrar la boleta de esta fase.</div>'
@@ -1173,15 +1173,15 @@ async function tReingresoLookup(){
     var yaApostó = boletas.find(function(b){return b.fase_id===T.faseId;});
     if(yaApostó){T.err='Ya registraste una boleta en esta fase';renderTotem();return;}
     T.nombre=found.nombre; T.tel=found.telefono||found.tel||''; T.correo=found.correo||''; T.isNew=false; T.err='';
-    T.boleta=''; T.fotoOk=false; T.fotoData=null; T.picks={};
-    goT('boleta');
+    T.foundAccount=true; T.foundNombre=found.nombre;
+    renderTotem();
   } catch(e){
     T.err='Error al buscar: '+e.message; renderTotem();
   }
 }
 
 function tReingresoNext(){
-  T.boleta=''; T.fotoOk=false; T.fotoData=null; T.picks={}; T.err='';
+  T.boleta=''; T.fotoOk=false; T.fotoData=null; T.picks={}; T.err=''; T.foundAccount=false;
   goT('boleta');
 }
 
