@@ -9,42 +9,51 @@ const { initDB } = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ─ Cloudinary config
+// ── Trust proxy (necesario en Render/Heroku)
+app.set('trust proxy', 1);
+
+// ── Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ─ Middlewares
+// ── Middlewares
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ─ Rate limiting
+// ── Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
-app.use('/api', limiter);
+app.use('/api/', limiter);
 
-// ─ Routes
-const participantesRoutes = require('./routes/participantes');
-const adminRoutes = require('./routes/admin');
+// ── Rutas API
+app.use('/api', require('./routes/participantes'));
+app.use('/api/admin', require('./routes/admin'));
 
-app.use('/api', participantesRoutes);
-app.use('/api/admin', adminRoutes);
-
-// ─ SPA fallback
+// ── Servir el frontend
+app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ─ Init
+// ── Arrancar servidor
 async function start() {
-  await initDB();
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  try {
+    await initDB();
+    app.listen(PORT, () => {
+      console.log('Servidor corriendo en puerto ' + PORT);
+    });
+  } catch (e) {
+    console.error('Error al iniciar:', e);
+    process.exit(1);
+  }
 }
 
 start();
