@@ -4,7 +4,7 @@ require('dotenv').config();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-  });
+});
 
 async function initDB() {
   const client = await pool.connect();
@@ -29,6 +29,13 @@ async function initDB() {
         apuestas JSONB DEFAULT '{}'
       );
     `);
+    // Migraciones — agrega columnas faltantes en DB existente
+    await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS tel VARCHAR(50)`);
+    await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS correo VARCHAR(200)`);
+    await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS canal VARCHAR(50) DEFAULT 'totem'`);
+    await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS fecha BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000`);
+    await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS boletas JSONB DEFAULT '[]'`);
+    await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS apuestas JSONB DEFAULT '{}'`);
     console.log('DB initialized');
   } finally {
     client.release();
