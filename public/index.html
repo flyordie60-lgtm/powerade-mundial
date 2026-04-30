@@ -456,21 +456,13 @@ function showAdminLogin(){
 function closeLogin(){document.getElementById('login-modal').style.display='none';}
 async function checkPass(){
   var pass = document.getElementById('admin-pass').value;
-  if(pass===ADMIN_PASS || true){ // verificamos contra la API
+  if(pass === ADMIN_PASS){
     ADMIN_PASS_HEADER = pass;
-    // Verificar contra la API
-    var test = await apiFetch('/admin/stats');
-    if(test.error && test.error.includes('autorizado')){
-      ADMIN_PASS_HEADER = null;
-      document.getElementById('pass-err').style.display='block';
-      document.getElementById('admin-pass').value='';
-      return;
-    }
-    closeLogin(); 
+    closeLogin();
     // Cargar datos desde la API
     await loadFasesFromAPI();
     await loadPartsFromAPI();
-    showView('admin'); 
+    showView('admin');
     setTimeout(function(){ adminTab('dashboard'); },50);
   } else {
     document.getElementById('pass-err').style.display='block';
