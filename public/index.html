@@ -937,11 +937,10 @@ function tBoleta(){
     +'<div><div class="lbl">Número de boleta</div>'
     +'<input class="fld-input" id="t-boleta" value="'+T.boleta+'" placeholder="Ej: B-2026-001234" oninput="T.boleta=this.value"></div>'
     +'<input type="file" id="foto-input" accept="image/*" capture="environment" style="display:none" onchange="fotoCapturada(this)">'
-    +'<div class="upload-box" onclick="document.getElementById(&quot;foto-input&quot;).click()" style="cursor:pointer">'
-    +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#888" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#888" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#888" stroke-width="1.5" stroke-linecap="round"/></svg>'
-    +'<div style="color:var(--red);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">TOMAR FOTO DE LA BOLETA</div>'
-    +'<div class="sub">Toca aquí para abrir la cámara</div>'
-    +(T.fotoOk?'<div class="info-ok" style="width:100%;text-align:center"><span>✓ Foto capturada</span></div>':'<div style="color:var(--dim);font-size:10px;text-align:center">(opcional)</div>')
+    +'<div class="upload-box" onclick="document.getElementById(&quot;foto-input&quot;).click()" style="cursor:pointer;'+(T.fotoOk?'border-color:var(--green)':'border-color:var(--red);border-style:solid')+'">'
+    +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="'+(T.fotoOk?'#2ECC71':'#CC0000')+'" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="'+(T.fotoOk?'#2ECC71':'#CC0000')+'" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="'+(T.fotoOk?'#2ECC71':'#CC0000')+'" stroke-width="1.5" stroke-linecap="round"/></svg>'
+    +'<div style="color:'+(T.fotoOk?'var(--green)':'var(--red)')+';font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">'+(T.fotoOk?'✓ FOTO CAPTURADA':'TOMAR FOTO DE LA BOLETA')+'</div>'
+    +(T.fotoOk?'<div class="sub" style="text-align:center;color:var(--green)">Listo — puedes continuar</div>':'<div class="sub" style="text-align:center">Obligatorio · Toca para abrir la cámara</div>')
     +'</div>'
     +(T.err?'<div class="err-msg">'+T.err+'</div>':'')
     +'<div class="row-btns">'
@@ -950,13 +949,10 @@ function tBoleta(){
     +'</div></div>';
 }
 
-function tBoletaNext(){
+async function tBoletaNext(){
   T.boleta = (document.getElementById('t-boleta')||{}).value||T.boleta;
   if(!T.boleta.trim()){T.err='Ingresa el número de boleta';renderTotem();return;}
-  // Verificar que la boleta no esté ya usada en esta fase
-  var parts=getParts();
-  var usada=parts.find(function(p){return p.boletas.find(function(b){return b.numero===T.boleta.trim()&&b.fase_id===T.faseId;});});
-  if(usada){T.err='Esta boleta ya fue registrada en esta fase';renderTotem();return;}
+  if(!T.fotoOk){T.err='📷 Toma la foto de tu boleta para continuar';renderTotem();return;}
   T.boleta=T.boleta.trim(); T.err='';
   goT(T.isNew?'registro':'apuestas');
 }
