@@ -355,7 +355,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 // STORAGE HELPERS
 // ══════════════════════════════════════════════════════════════════════════
 var ADMIN_PASS = 'admin2026';
-var API = '';
+var API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? '' : 'https://powerade-mundial.onrender.com';
 
 // ══════════════════════════════════════════════════════════════════════════
 // CACHE LOCAL (para rendimiento)
