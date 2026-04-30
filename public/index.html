@@ -990,7 +990,8 @@ function tBoletaNext(){
   if(!T.boleta.trim()){T.err='Ingresa el número de boleta';renderTotem();return;}
   if(!T.fotoOk){T.err='📷 Toma la foto de tu boleta para continuar';renderTotem();return;}
   T.boleta=T.boleta.trim(); T.err='';
-  goT(T.isNew?'registro':'apuestas');
+  // Si foundAccount=true, es reingreso aunque isNew pueda estar mal
+  goT((T.isNew && !T.foundAccount)?'registro':'apuestas');
 }
 
 function tRegistro(){
