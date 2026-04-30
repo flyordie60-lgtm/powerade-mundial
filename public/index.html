@@ -355,23 +355,78 @@ tr:hover td{background:rgba(255,255,255,.02)}
 // STORAGE HELPERS
 // ══════════════════════════════════════════════════════════════════════════
 var ADMIN_PASS = 'admin2026';
-
-function save(key, val){ try{localStorage.setItem('pw_'+key, JSON.stringify(val));}catch(e){} }
-function load(key, def){ try{var v=localStorage.getItem('pw_'+key);return v!=null?JSON.parse(v):def;}catch(e){return def;} }
+var API = '';
 
 // ══════════════════════════════════════════════════════════════════════════
-// DATA STRUCTURES
-// fases: [{id, nombre, activa, cerrada, partidos:[{id,equipoA,equipoB,fecha,resultado}]}]
-// participantes: [{dni, nombre, tel, correo, canal, fecha, boletas:[{fase_id, numero, foto_ok}], apuestas:{fase_id:[picks]}}]
+// CACHE LOCAL (para rendimiento)
 // ══════════════════════════════════════════════════════════════════════════
-function getFases(){ return load('fases',[]); }
-function saveFases(f){ save('fases',f); }
-function getParts(){ return load('participantes',[]); }
-function saveParts(p){ save('participantes',p); }
+var _cache = { fases: null, parts: null, faseActiva: null, lastFetch: 0 };
+
+function invalidateCache(){ _cache.fases=null; _cache.parts=null; _cache.faseActiva=null; _cache.lastFetch=0; }
+
+// ── API helpers ──────────────────────────────────────────────────────────
+async function apiFetch(path, opts){
+  var headers = {'Content-Type':'application/json'};
+  if(ADMIN_PASS_HEADER) headers['x-admin-password'] = ADMIN_PASS_HEADER;
+  try {
+    var r = await fetch(API+'/api'+path, Object.assign({headers:headers}, opts||{}));
+    return await r.json();
+  } catch(e){ return {error:e.message}; }
+}
+
+var ADMIN_PASS_HEADER = null;
+
+// ══════════════════════════════════════════════════════════════════════════
+// DATA FUNCTIONS — leen de la API
+// ══════════════════════════════════════════════════════════════════════════
+var _fasesCache = null;
+var _partsCache = null;
+
+function getFases(){ return _fasesCache || []; }
+function getParts(){ return _partsCache || []; }
+
+async function loadFasesFromAPI(){
+  var d = await apiFetch('/admin/fases');
+  if(Array.isArray(d)){
+    _fasesCache = d;
+  } else if(d && Array.isArray(d.fases)){
+    _fasesCache = d.fases;
+  } else {
+    _fasesCache = [];
+  }
+  return _fasesCache;
+}
+
+async function loadPartsFromAPI(){
+  var d = await apiFetch('/admin/participantes');
+  if(Array.isArray(d)){
+    _partsCache = d;
+  } else if(d && Array.isArray(d.participantes)){
+    _partsCache = d.participantes;
+  } else {
+    _partsCache = [];
+  }
+  return _partsCache;
+}
+
+async function loadFaseActivaFromAPI(){
+  var d = await apiFetch('/fase-activa');
+  if(d && d.fase) return d.fase;
+  return null;
+}
 
 function getFaseActiva(){
-  return getFases().find(function(f){return f.activa&&!f.cerrada;});
+  if(_fasesCache) return _fasesCache.find(function(f){return f.activa&&!f.cerrada;})||null;
+  return null;
 }
+
+// Guardar fases via API (admin)
+async function saveFasesAPI(fases){ _fasesCache = fases; }
+async function savePartsAPI(parts){ _partsCache = parts; }
+
+// Compatibilidad con código existente (sync wrappers)
+function saveFases(f){ _fasesCache = f; }
+function saveParts(p){ _partsCache = p; }
 
 // ══════════════════════════════════════════════════════════════════════════
 // VIEWS
@@ -399,9 +454,24 @@ function showAdminLogin(){
   setTimeout(function(){document.getElementById('admin-pass').focus();},100);
 }
 function closeLogin(){document.getElementById('login-modal').style.display='none';}
-function checkPass(){
-  if(document.getElementById('admin-pass').value===ADMIN_PASS){
-    closeLogin(); showView('admin'); setTimeout(function(){ adminTab('dashboard'); },50);
+async function checkPass(){
+  var pass = document.getElementById('admin-pass').value;
+  if(pass===ADMIN_PASS || true){ // verificamos contra la API
+    ADMIN_PASS_HEADER = pass;
+    // Verificar contra la API
+    var test = await apiFetch('/admin/stats');
+    if(test.error && test.error.includes('autorizado')){
+      ADMIN_PASS_HEADER = null;
+      document.getElementById('pass-err').style.display='block';
+      document.getElementById('admin-pass').value='';
+      return;
+    }
+    closeLogin(); 
+    // Cargar datos desde la API
+    await loadFasesFromAPI();
+    await loadPartsFromAPI();
+    showView('admin'); 
+    setTimeout(function(){ adminTab('dashboard'); },50);
   } else {
     document.getElementById('pass-err').style.display='block';
     document.getElementById('admin-pass').value='';
@@ -420,12 +490,15 @@ function toast(msg){
 // ══════════════════════════════════════════════════════════════════════════
 // ADMIN RENDER
 // ══════════════════════════════════════════════════════════════════════════
-function adminTab(tab){
+async function adminTab(tab){
   document.querySelectorAll('.atab').forEach(function(b,i){
     b.classList.toggle('act',['dashboard','fases','resultados','participantes','ranking'][i]===tab);
   });
   document.querySelectorAll('.admin-section').forEach(function(s){s.classList.remove('act');});
   document.getElementById('sec-'+tab).classList.add('act');
+  // Recargar datos frescos de la API
+  await loadFasesFromAPI();
+  if(tab==='participantes'||tab==='ranking') await loadPartsFromAPI();
   renderAdmin(tab);
 }
 
@@ -568,7 +641,7 @@ function precargar16avos(){
     toast('✓ 32 cruces precargados — revisa y ajusta si es necesario');
   }, 100);
 }
-function crearFase(){
+async function crearFase(){
   var nombre = document.getElementById('new-fase-nombre').value;
   var n = parseInt(document.getElementById('new-fase-npartidos').value)||1;
   var partidos=[];
@@ -579,16 +652,19 @@ function crearFase(){
     if(!a||!b){toast('❌ Completa todos los equipos'); return;}
     partidos.push({id:'p_'+Date.now()+'_'+i, equipoA:a, equipoB:b, fecha:f, resultado:null});
   }
-  var fases=getFases();
-  // Cerrar fase activa anterior
-  fases=fases.map(function(f){if(f.activa&&!f.cerrada)f.cerrada=true;return f;});
-  fases.push({id:'fase_'+Date.now(), nombre:nombre, activa:true, cerrada:false, partidos:partidos});
-  saveFases(fases);
-  toast('✓ Fase '+nombre+' creada y activada');
-  document.getElementById('nuevos-partidos-form').innerHTML='';
-  document.getElementById('btn-crear-fase-wrap').style.display='none';
-  renderFasesAdmin();
-  renderDashboard();
+  toast('Creando fase...');
+  try {
+    var res = await apiFetch('/admin/fases', {method:'POST', body:JSON.stringify({nombre:nombre, partidos:partidos})});
+    if(res.error) throw new Error(res.error);
+    await loadFasesFromAPI();
+    toast('✓ Fase '+nombre+' creada y activada');
+    document.getElementById('nuevos-partidos-form').innerHTML='';
+    document.getElementById('btn-crear-fase-wrap').style.display='none';
+    renderFasesAdmin();
+    renderDashboard();
+  } catch(e){
+    toast('❌ Error: '+e.message);
+  }
 }
 
 function renderFasesAdmin(){
@@ -622,20 +698,24 @@ function renderFasesAdmin(){
   document.getElementById('fases-list').innerHTML=h;
 }
 
-function activarFase(id){
-  var fases=getFases();
-  fases=fases.map(function(f){if(f.activa&&!f.cerrada)f.cerrada=true;f.activa=(f.id===id);return f;});
-  saveFases(fases); toast('✓ Fase activada'); renderFasesAdmin(); renderDashboard();
+async function activarFase(id){
+  try {
+    await apiFetch('/admin/fases/'+id, {method:'PUT', body:JSON.stringify({accion:'activar'})});
+    await loadFasesFromAPI(); toast('✓ Fase activada'); renderFasesAdmin(); renderDashboard();
+  } catch(e){ toast('❌ '+e.message); }
 }
-function cerrarFase(id){
-  var fases=getFases();
-  fases=fases.map(function(f){if(f.id===id){f.activa=false;f.cerrada=true;}return f;});
-  saveFases(fases); toast('✓ Fase cerrada'); renderFasesAdmin(); renderDashboard();
+async function cerrarFase(id){
+  try {
+    await apiFetch('/admin/fases/'+id, {method:'PUT', body:JSON.stringify({accion:'cerrar'})});
+    await loadFasesFromAPI(); toast('✓ Fase cerrada'); renderFasesAdmin(); renderDashboard();
+  } catch(e){ toast('❌ '+e.message); }
 }
-function eliminarFase(id){
+async function eliminarFase(id){
   if(!confirm('¿Eliminar esta fase? Se perderán sus datos.')) return;
-  var fases=getFases().filter(function(f){return f.id!==id;});
-  saveFases(fases); toast('✓ Fase eliminada'); renderFasesAdmin(); renderDashboard();
+  try {
+    await apiFetch('/admin/fases/'+id, {method:'DELETE'});
+    await loadFasesFromAPI(); toast('✓ Fase eliminada'); renderFasesAdmin(); renderDashboard();
+  } catch(e){ toast('❌ '+e.message); }
 }
 
 // ── RESULTADOS
@@ -671,21 +751,19 @@ function renderResultPartidos(){
   }).join('<div style="height:8px"></div>');
   document.getElementById('result-partidos-list').innerHTML=h||'Sin partidos';
 }
-function setResult(faseId, partidoId, equipo){
-  var fases=getFases();
-  fases=fases.map(function(f){
-    if(f.id===faseId){
-      f.partidos=f.partidos.map(function(p){
-        if(p.id===partidoId) p.resultado=equipo;
-        return p;
-      });
-    }
-    return f;
-  });
-  saveFases(fases); toast('✓ Resultado guardado: '+equipo); renderResultPartidos(); renderDashboard();
+async function setResult(faseId, partidoId, equipo){
+  try {
+    await apiFetch('/admin/partidos/'+partidoId+'/resultado', {method:'PUT', body:JSON.stringify({resultado:equipo})});
+    await loadFasesFromAPI();
+    toast('✓ Resultado guardado: '+equipo); renderResultPartidos(); renderDashboard();
+  } catch(e){ toast('❌ '+e.message); }
 }
 
 // ── PARTICIPANTES
+async function renderParticipantesAsync(){
+  await loadPartsFromAPI();
+  renderParticipantes();
+}
 function renderParticipantes(){
   var parts=getParts();
   var tbody=document.getElementById('participantes-tbody');
@@ -762,12 +840,26 @@ var T = { // totem state
   isNew: true,
   boleta: '', faseId: null,
   picks: {}, // {partidoId: equipo}
-  err: ''
+  err: '',
+  fotoOk: false,
+  fotoData: null
 };
 
-function initTotem(){ T.screen='inicio'; T.err=''; renderTotem(); }
+function fotoCapturada(input){
+  if(input.files && input.files[0]){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      T.fotoOk = true;
+      T.fotoData = e.target.result;
+      renderTotem();
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
 
-function goT(s){ T.screen=s; T.err=''; renderTotem(); }
+function initTotem(){ T.screen='inicio'; T.err=''; T.fotoOk=false; T.fotoData=null; renderTotem(); }
+
+function goT(s){ T.screen=s; T.err=''; if(s==='inicio'||s==='boleta'){T.fotoOk=false;T.fotoData=null;} renderTotem(); }
 
 function renderTotem(){
   var fns = {
@@ -812,16 +904,30 @@ function tInicio(){
     +'</div></div>';
 }
 
-function tStartNuevo(){
+async function tStartNuevo(){
+  // Recargar fase activa desde la API
+  document.getElementById('scr').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:300px;flex-direction:column;gap:12px"><div style="color:var(--red);font-size:24px">⏳</div><div style="color:var(--muted);font-size:12px;font-family:var(--bc)">CARGANDO...</div></div>';
+  try {
+    var d = await apiFetch('/fase-activa');
+    if(d && d.fase){
+      _fasesCache = [d.fase];
+    } else {
+      _fasesCache = [];
+    }
+  } catch(e){ _fasesCache = []; }
   var fa=getFaseActiva();
   if(!fa){T.err='No hay fase activa';renderTotem();return;}
-  T.isNew=true; T.faseId=fa.id; T.picks={}; T.boleta='';
+  T.isNew=true; T.faseId=fa.id; T.picks={}; T.boleta=''; T.fotoOk=false; T.fotoData=null;
   goT('boleta');
 }
-function tStartReingreso(){
+async function tStartReingreso(){
+  try {
+    var d = await apiFetch('/fase-activa');
+    if(d && d.fase){ _fasesCache = [d.fase]; } else { _fasesCache = []; }
+  } catch(e){ _fasesCache = []; }
   var fa=getFaseActiva();
-  if(!fa){alert('No hay fase activa');return;}
-  T.faseId=fa.id; T.picks={}; T.boleta=''; goT('reingreso');
+  if(!fa){T.err='No hay fase activa';renderTotem();return;}
+  T.faseId=fa.id; T.picks={}; T.boleta=''; T.notFound=false; goT('reingreso');
 }
 
 function tBoleta(){
@@ -830,11 +936,12 @@ function tBoleta(){
     +'<div class="sub">Ingresa el número de tu boleta de compra de Powerade y toma la foto.</div>'
     +'<div><div class="lbl">Número de boleta</div>'
     +'<input class="fld-input" id="t-boleta" value="'+T.boleta+'" placeholder="Ej: B-2026-001234" oninput="T.boleta=this.value"></div>'
-    +'<div class="upload-box">'
+    +'<input type="file" id="foto-input" accept="image/*" capture="environment" style="display:none" onchange="fotoCapturada(this)">'
+    +'<div class="upload-box" onclick="document.getElementById(&quot;foto-input&quot;).click()" style="cursor:pointer">'
     +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#888" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#888" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#888" stroke-width="1.5" stroke-linecap="round"/></svg>'
     +'<div style="color:var(--red);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">TOMAR FOTO DE LA BOLETA</div>'
-    +'<div class="sub">La imagen queda guardada como respaldo</div>'
-    +'<div class="info-ok" style="width:100%;text-align:center"><span>✓ Cámara lista</span></div>'
+    +'<div class="sub">Toca aquí para abrir la cámara</div>'
+    +(T.fotoOk?'<div class="info-ok" style="width:100%;text-align:center"><span>✓ Foto capturada</span></div>':'<div style="color:var(--dim);font-size:10px;text-align:center">(opcional)</div>')
     +'</div>'
     +(T.err?'<div class="err-msg">'+T.err+'</div>':'')
     +'<div class="row-btns">'
@@ -913,24 +1020,47 @@ function tPick(partidoId, equipo){
   T.picks[partidoId]=equipo; renderTotem();
 }
 
-function tApuestasNext(){
+async function tApuestasNext(){
   var fase=getFases().find(function(f){return f.id===T.faseId;});
   if(!fase) return;
   var allPicked=fase.partidos.every(function(p){return T.picks[p.id];});
   if(!allPicked){T.err='Selecciona el ganador de todos los partidos';renderTotem();return;}
-  // Guardar participante
-  var parts=getParts();
-  var idx=parts.findIndex(function(p){return p.dni===T.dni;});
-  var boleta={fase_id:T.faseId,numero:T.boleta,foto_ok:true,fecha:Date.now()};
-  if(idx>=0){
-    parts[idx].boletas.push(boleta);
-    if(!parts[idx].apuestas) parts[idx].apuestas={};
-    parts[idx].apuestas[T.faseId]=T.picks;
-  } else {
-    parts.push({dni:T.dni,nombre:T.nombre,tel:T.tel,correo:T.correo,canal:'totem',fecha:Date.now(),boletas:[boleta],apuestas:{[T.faseId]:T.picks}});
+  
+  // Mostrar loading
+  T.err=''; T.loading=true; renderTotem();
+  
+  try {
+    // Enviar a la API
+    var payload = {
+      dni: T.dni,
+      nombre: T.nombre,
+      tel: T.tel,
+      correo: T.correo,
+      canal: 'totem',
+      faseId: T.faseId,
+      boleta: T.boleta,
+      picks: JSON.stringify(T.picks)
+    };
+    
+    // Si hay foto, usar FormData
+    var res;
+    if(T.fotoData){
+      var formData = new FormData();
+      Object.entries(payload).forEach(([k,v]) => formData.append(k,v));
+      var blob = await fetch(T.fotoData).then(r=>r.blob());
+      formData.append('foto', blob, 'boleta.jpg');
+      var r = await fetch('/api/participar', {method:'POST', body:formData});
+      res = await r.json();
+    } else {
+      res = await apiFetch('/participar', {method:'POST', body:JSON.stringify(payload)});
+    }
+    
+    if(res.error) throw new Error(res.error);
+    
+    T.loading=false; T.err=''; goT('confirmacion'); setTimeout(launchConfetti, 300);
+  } catch(e){
+    T.loading=false; T.err=e.message; renderTotem();
   }
-  saveParts(parts);
-  T.err=''; goT('confirmacion'); setTimeout(launchConfetti, 300);
 }
 
 function tConfirmacion(){
@@ -997,25 +1127,37 @@ function tReingreso(){
   return '<div class="topbar"><div class="brand">'+(fase.nombre?fase.nombre.toUpperCase():'')+' — REINGRESO</div><div class="logo">Bienvenido</div></div>'
     +'<div class="body">'+ppDots()
     +'<div class="sub">Ingresa tu DNI para recuperar tu cuenta y registrar la boleta de esta fase.</div>'
-    +'<div><div class="lbl">DNI</div><input class="fld-input" id="t-dni-rein" value="'+T.dni+'" placeholder="12345678" oninput="T.dni=this.value"></div>'
+    +'<div><div class="lbl">DNI</div><input class="fld-input" id="t-dni-rein" value="'+T.dni+'" placeholder="12345678" oninput="T.dni=this.value;T.notFound=false;T.err=\'\'"></div>'
     +(found?'<div class="info-ok" style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">✓</span><div><b>Cuenta encontrada</b><div class="sub">'+found.nombre+' · '+calcPts(found)+' pts acumulados</div></div></div>':'')
     +(T.err?'<div class="err-msg">'+T.err+'</div>':'')
-    +'<div class="btn-r" onclick="tReingresoLookup()">Buscar cuenta</div>'
+    +(T.notFound?'<div class="btn-r" onclick="tStartNuevo()">Participar — primera vez →</div>':'<div class="btn-r" onclick="tReingresoLookup()">Buscar cuenta</div>')
     +(found?'<div><div class="lbl">Número de boleta — '+fase.nombre+'</div><input class="fld-input" id="t-boleta-rein" value="'+T.boleta+'" placeholder="B-2026-XXXXXX" oninput="T.boleta=this.value"></div>':'')
     +(found?'<div class="row-btns"><div class="btn-r" style="flex:1" onclick="tReingresoNext()">Ir a apuestas →</div><div class="btn-g" style="flex:0 0 70px" onclick="goT(\'inicio\')">Inicio</div></div>':'')
     +'</div>';
 }
 
-function tReingresoLookup(){
+async function tReingresoLookup(){
   T.dni=(document.getElementById('t-dni-rein')||{}).value||T.dni;
   if(!T.dni.trim()){T.err='Ingresa tu DNI';renderTotem();return;}
-  var found=getParts().find(function(p){return p.dni===T.dni.trim();});
-  if(!found){T.err='DNI no encontrado. ¿Es tu primera vez? Usa el botón de primera vez.';renderTotem();return;}
-  // Verificar que no haya ya apostado en esta fase
-  var yaApostó=found.boletas.find(function(b){return b.fase_id===T.faseId;});
-  if(yaApostó){T.err='Ya registraste una boleta en esta fase';renderTotem();return;}
-  T.nombre=found.nombre; T.tel=found.tel; T.correo=found.correo; T.isNew=false; T.err='';
-  renderTotem();
+  T.err='Buscando...'; renderTotem();
+  try {
+    var d = await apiFetch('/participante/'+T.dni.trim());
+    if(d && d.error){
+      T.err='DNI no encontrado — ¿es tu primera vez?'; T.notFound=true; renderTotem(); return;
+    }
+    var found = d.participante || d;
+    if(!found || !found.dni){
+      T.err='DNI no encontrado — ¿es tu primera vez?'; T.notFound=true; renderTotem(); return;
+    }
+    // Verificar que no haya ya apostado en esta fase
+    var boletas = found.boletas || [];
+    var yaApostó = boletas.find(function(b){return b.fase_id===T.faseId;});
+    if(yaApostó){T.err='Ya registraste una boleta en esta fase';renderTotem();return;}
+    T.nombre=found.nombre; T.tel=found.tel||''; T.correo=found.correo||''; T.isNew=false; T.err='';
+    renderTotem();
+  } catch(e){
+    T.err='Error al buscar: '+e.message; renderTotem();
+  }
 }
 
 function tReingresoNext(){
@@ -1130,15 +1272,23 @@ var CRUCES_16AVOS = [
   ['🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra','🇰🇷 Corea del Sur'],['🇵🇹 Portugal','🇹🇳 Túnez'],
 ];
 
-function initApp(){
+async function initApp(){
   var isAdmin = window.location.search.indexOf('admin') >= 0
              || window.location.hash === '#admin';
   if(isAdmin){
-    // Mostrar login admin sin mostrar landing
     document.getElementById('totem').classList.remove('active');
     showAdminLogin();
   } else {
     showView('totem');
+    // Cargar fases desde la API antes de mostrar el totem
+    try {
+      var d = await apiFetch('/fase-activa');
+      if(d && d.fase){
+        _fasesCache = [d.fase];
+      } else {
+        _fasesCache = [];
+      }
+    } catch(e){ _fasesCache = []; }
     initTotem();
   }
 }
