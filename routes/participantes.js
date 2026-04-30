@@ -8,12 +8,35 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 // GET /api/fase-activa
 router.get('/fase-activa', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM fases WHERE activa=true AND cerrada=false LIMIT 1');
+    const { rows } = await pool.query(`
+      SELECT f.*,
+        COALESCE(json_agg(p ORDER BY p.orden) FILTER (WHERE p.id IS NOT NULL), '[]') as partidos
+      FROM fases f
+      LEFT JOIN partidos p ON p.fase_id = f.id
+      WHERE f.activa = true AND f.cerrada = false
+      GROUP BY f.id
+    `);
     if (!rows.length) return res.json({ fase: null });
-    const f = rows[0];
-    f.partidos = f.partidos || [];
-    res.json({ fase: f });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ fase: rows[0] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/participante/:dni
+router.get('/participante/:dni', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM participantes WHERE dni=$1', [req.params.dni]);
+    if (!rows.length) return res.status(404).json({ error: 'DNI no encontrado' });
+    res.json({ participante: rows[0] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ranking
+router.get('/ranking', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM participantes ORDER BY fecha DESC');
+    const fases = await pool.query('SELECT * FROM fases ORDER BY fecha_creacion');
+    res.json({ ranking: rows, fases: fases.rows });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /api/participar
@@ -43,28 +66,10 @@ router.post('/participar', upload.single('foto'), async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, foto_url });
-  } catch (e) {
+  } catch(e) {
     await client.query('ROLLBACK');
     res.status(400).json({ error: e.message });
   } finally { client.release(); }
-});
-
-// GET /api/participante/:dni
-router.get('/participante/:dni', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM participantes WHERE dni=$1', [req.params.dni]);
-    if (!rows.length) return res.status(404).json({ error: 'DNI no encontrado' });
-    res.json({ participante: rows[0] });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET /api/ranking
-router.get('/ranking', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`SELECT * FROM participantes ORDER BY fecha DESC`);
-    const fases = await pool.query('SELECT * FROM fases ORDER BY created_at');
-    res.json({ ranking: rows, fases: fases.rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;
