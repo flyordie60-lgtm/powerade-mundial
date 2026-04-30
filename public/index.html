@@ -330,7 +330,6 @@ tr:hover td{background:rgba(255,255,255,.02)}
       </div>
     </div>
   </div>
-</div>
 
   <!-- VERIFICACIÓN -->
   <div id="sec-verificacion" class="admin-section">
@@ -344,6 +343,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
       </div>
     </div>
   </div>
+
+</div>
 
 <div class="success-toast" id="toast"></div>
 
@@ -492,14 +493,14 @@ async function adminTab(tab){
   renderAdmin(tab);
 }
 
-function renderAdmin(tab){
+async function renderAdmin(tab){
   var t = tab||'dashboard';
   if(t==='dashboard') renderDashboard();
   if(t==='fases') renderFasesAdmin();
   if(t==='resultados') renderResultados();
   if(t==='participantes') renderParticipantes();
   if(t==='ranking') renderRankingAdmin();
-  if(t==='verificacion') renderVerificacion();
+  if(t==='verificacion') await renderVerificacion();
 }
 
 // ── DASHBOARD
