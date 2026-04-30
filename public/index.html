@@ -849,7 +849,54 @@ function fotoCapturada(input){
   }
 }
 
-function initTotem(){ T.screen='inicio'; T.err=''; T.fotoOk=false; T.fotoData=null; renderTotem(); }
+function abrirCamara(){
+  var modal=document.createElement('div');
+  modal.id='cam-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.97);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px';
+  modal.innerHTML=
+    '<div style="color:#fff;font-family:\'Barlow Condensed\',sans-serif;font-size:16px;font-weight:700;letter-spacing:1px;text-align:center">APUNTA LA CAMARA A TU BOLETA</div>'+
+    '<video id="cam-video" autoplay playsinline muted style="width:100%;max-width:380px;border-radius:12px;border:2px solid #CC0000;background:#000;max-height:260px;object-fit:cover"></video>'+
+    '<canvas id="cam-canvas" style="display:none"></canvas>'+
+    '<div style="display:flex;gap:10px;width:100%;max-width:380px">'+
+      '<button style="flex:1;background:#CC0000;color:#fff;border:none;padding:15px;border-radius:12px;font-family:\'Barlow Condensed\',sans-serif;font-size:15px;font-weight:700;cursor:pointer;letter-spacing:1px" onclick="capturarFoto()">CAPTURAR FOTO</button>'+
+      '<button style="background:#1a1a1a;color:#888;border:1px solid #333;padding:15px 18px;border-radius:12px;font-size:13px;cursor:pointer" onclick="cerrarCamara()">X</button>'+
+    '</div>';
+  document.body.appendChild(modal);
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}})
+    .then(function(s){ window._camStream=s; document.getElementById('cam-video').srcObject=s; })
+    .catch(function(){
+      navigator.mediaDevices.getUserMedia({video:true})
+        .then(function(s){ window._camStream=s; document.getElementById('cam-video').srcObject=s; })
+        .catch(function(e){ cerrarCamara(); alert('No se pudo acceder a la camara: '+e.message); });
+    });
+}
+
+function capturarFoto(){
+  var v=document.getElementById('cam-video');
+  var c=document.getElementById('cam-canvas');
+  c.width=v.videoWidth; c.height=v.videoHeight;
+  c.getContext('2d').drawImage(v,0,0);
+  T.fotoData=c.toDataURL('image/jpeg',0.85);
+  T.fotoOk=true;
+  cerrarCamara();
+  renderTotem();
+}
+
+function cerrarCamara(){
+  if(window._camStream){ window._camStream.getTracks().forEach(function(t){t.stop();}); window._camStream=null; }
+  var m=document.getElementById('cam-modal');
+  if(m) m.remove();
+}
+
+async function initTotem(){
+  T.screen='inicio'; T.err=''; T.fotoOk=false; T.fotoData=null;
+  // Cargar fase activa de la API
+  try {
+    var d = await apiFetch('/fase-activa');
+    _fasesCache = (d && d.fase) ? [d.fase] : [];
+  } catch(e){ _fasesCache = []; }
+  renderTotem();
+}
 
 function goT(s){ T.screen=s; T.err=''; if(s==='inicio'||s==='boleta'){T.fotoOk=false;T.fotoData=null;} renderTotem(); }
 
@@ -890,7 +937,7 @@ function tInicio(){
     +'</div>'
     +'<div style="display:flex;flex-direction:column;gap:8px">'
     +(fa?'<div class="btn-r" onclick="tStartNuevo()">Participar — primera vez</div><div class="btn-o" onclick="tStartReingreso()">Ya tengo cuenta — ingresar DNI</div>'
-        :'<div class="btn-r" disabled>Sin fase activa</div>')
+        :'<div class="btn-r" style="background:#333;color:#555;cursor:not-allowed;opacity:.5">⏳ Sin fase activa</div>')
     +'</div></div>';
 }
 
@@ -926,12 +973,7 @@ function tBoleta(){
     +'<div class="sub">Ingresa el número de tu boleta de compra de Powerade y toma la foto.</div>'
     +'<div><div class="lbl">Número de boleta</div>'
     +'<input class="fld-input" id="t-boleta" value="'+T.boleta+'" placeholder="Ej: B-2026-001234" oninput="T.boleta=this.value"></div>'
-    +'<input type="file" id="foto-input" accept="image/*" capture="environment" style="display:none" onchange="fotoCapturada(this)">'
-    +'<div class="upload-box" onclick="document.getElementById(&quot;foto-input&quot;).click()" style="cursor:pointer;'+(T.fotoOk?'border-color:var(--green)':'border-color:var(--red);border-style:solid')+'">'
-    +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="'+(T.fotoOk?'#2ECC71':'#CC0000')+'" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="'+(T.fotoOk?'#2ECC71':'#CC0000')+'" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="'+(T.fotoOk?'#2ECC71':'#CC0000')+'" stroke-width="1.5" stroke-linecap="round"/></svg>'
-    +'<div style="color:'+(T.fotoOk?'var(--green)':'var(--red)')+';font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">'+(T.fotoOk?'✓ FOTO CAPTURADA':'TOMAR FOTO DE LA BOLETA')+'</div>'
-    +(T.fotoOk?'<div class="sub" style="text-align:center;color:var(--green)">Listo — puedes continuar</div>':'<div class="sub" style="text-align:center">Obligatorio · Toca para abrir la cámara</div>')
-    +'</div>'
+    +(T.fotoOk      ?'<div class="upload-box" style="border-color:var(--green);cursor:pointer" onclick="abrirCamara()">'        +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#2ECC71" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#2ECC71" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#2ECC71" stroke-width="1.5" stroke-linecap="round"/></svg>'        +'<div style="color:var(--green);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">✓ FOTO CAPTURADA</div>'        +'<img src="'+T.fotoData+'" style="width:100%;max-height:80px;object-fit:cover;border-radius:8px;margin-top:4px">'        +'<div class="sub" style="text-align:center;color:var(--green)">Toca para tomar otra</div>'      +'</div>'      :'<div class="upload-box" style="border-color:var(--red);border-style:solid;cursor:pointer" onclick="abrirCamara()">'        +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#CC0000" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#CC0000" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#CC0000" stroke-width="1.5" stroke-linecap="round"/></svg>'        +'<div style="color:var(--red);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">📷 TOMAR FOTO DE BOLETA</div>'        +'<div class="sub" style="text-align:center">Obligatorio · Toca para activar la cámara</div>'      +'</div>'    )
     +(T.err?'<div class="err-msg">'+T.err+'</div>':'')
     +'<div class="row-btns">'
     +'<div class="btn-r" style="flex:1" onclick="tBoletaNext()">Continuar →</div>'
