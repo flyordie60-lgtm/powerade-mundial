@@ -352,17 +352,17 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 <script>
 // ══════════════════════════════════════════════════════════════════════════
-// STORAGE HELPERS
+// CONFIG
 // ══════════════════════════════════════════════════════════════════════════
 var ADMIN_PASS = 'admin2026';
 var API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? '' : 'https://powerade-mundial.onrender.com';
 
 // ══════════════════════════════════════════════════════════════════════════
-// CACHE LOCAL (para rendimiento)
+// CACHE LOCAL
 // ══════════════════════════════════════════════════════════════════════════
-var _cache = { fases: null, parts: null, faseActiva: null, lastFetch: 0 };
-
-function invalidateCache(){ _cache.fases=null; _cache.parts=null; _cache.faseActiva=null; _cache.lastFetch=0; }
+var _fasesCache = null;
+var _partsCache = null;
+var ADMIN_PASS_HEADER = null;
 
 // ── API helpers ──────────────────────────────────────────────────────────
 async function apiFetch(path, opts){
@@ -374,26 +374,23 @@ async function apiFetch(path, opts){
   } catch(e){ return {error:e.message}; }
 }
 
-var ADMIN_PASS_HEADER = null;
-
 // ══════════════════════════════════════════════════════════════════════════
-// DATA FUNCTIONS — leen de la API
+// NORMALIZACIÓN — FIX 1: soporta cualquier nombre de campo del backend
 // ══════════════════════════════════════════════════════════════════════════
-var _fasesCache = null;
-var _partsCache = null;
-
-function getFases(){ return _fasesCache || []; }
-function getParts(){ return _partsCache || []; }
-
 function normalizeFase(f){
-  // Convierte equipo_a/equipo_b a equipoA/equipoB
   if(f.partidos) f.partidos = f.partidos.map(function(p){
-    p.equipoA = p.equipoA || p.equipo_a || '';
-    p.equipoB = p.equipoB || p.equipo_b || '';
+    p.equipoA = p.equipo_a || p.equipoA || p.team_a || p.local || p.home || '';
+    p.equipoB = p.equipo_b || p.equipoB || p.team_b || p.visitante || p.away || '';
     return p;
   });
   return f;
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// DATA FUNCTIONS
+// ══════════════════════════════════════════════════════════════════════════
+function getFases(){ return _fasesCache || []; }
+function getParts(){ return _partsCache || []; }
 
 async function loadFasesFromAPI(){
   var d = await apiFetch('/admin/fases');
@@ -416,22 +413,11 @@ async function loadPartsFromAPI(){
   return _partsCache;
 }
 
-async function loadFaseActivaFromAPI(){
-  var d = await apiFetch('/fase-activa');
-  if(d && d.fase) return d.fase;
-  return null;
-}
-
 function getFaseActiva(){
   if(_fasesCache) return _fasesCache.find(function(f){return f.activa&&!f.cerrada;})||null;
   return null;
 }
 
-// Guardar fases via API (admin)
-async function saveFasesAPI(fases){ _fasesCache = fases; }
-async function savePartsAPI(parts){ _partsCache = parts; }
-
-// Compatibilidad con código existente (sync wrappers)
 function saveFases(f){ _fasesCache = f; }
 function saveParts(p){ _partsCache = p; }
 
@@ -441,14 +427,6 @@ function saveParts(p){ _partsCache = p; }
 function showView(v){
   document.querySelectorAll('.view').forEach(function(el){el.classList.remove('active');});
   document.getElementById(v).classList.add('active');
-  if(v==='landing') updateLandingStatus();
-}
-
-function updateLandingStatus(){
-  var fa = getFaseActiva();
-  var el = document.getElementById('landing-status');
-  if(fa) el.innerHTML='FASE ACTIVA: <b style="color:var(--red)">'+fa.nombre+'</b> — '+fa.partidos.length+' partidos';
-  else { var fs=getFases(); el.innerHTML=fs.length?'Todas las fases cerradas':'Sin fases configuradas aún'; }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -466,7 +444,6 @@ async function checkPass(){
   if(pass === ADMIN_PASS){
     ADMIN_PASS_HEADER = pass;
     closeLogin();
-    // Cargar datos desde la API
     await loadFasesFromAPI();
     await loadPartsFromAPI();
     showView('admin');
@@ -487,7 +464,7 @@ function toast(msg){
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// ADMIN RENDER
+// ADMIN TABS
 // ══════════════════════════════════════════════════════════════════════════
 async function adminTab(tab){
   document.querySelectorAll('.atab').forEach(function(b,i){
@@ -495,7 +472,6 @@ async function adminTab(tab){
   });
   document.querySelectorAll('.admin-section').forEach(function(s){s.classList.remove('act');});
   document.getElementById('sec-'+tab).classList.add('act');
-  // Recargar datos frescos de la API
   await loadFasesFromAPI();
   if(tab==='participantes'||tab==='ranking') await loadPartsFromAPI();
   renderAdmin(tab);
@@ -515,13 +491,12 @@ function renderDashboard(){
   var fases = getFases();
   var parts = getParts();
   var fa = getFaseActiva();
-  var totalPts = parts.reduce(function(a,p){return a+calcPts(p);},0);
 
   var stats = [
     {n:parts.length, l:'Participantes'},
     {n:fases.length, l:'Fases cargadas'},
     {n:fa?fa.nombre:'—', l:'Fase activa', small:true},
-    {n:parts.reduce(function(a,p){return a+p.boletas.length;},0), l:'Boletas registradas'},
+    {n:parts.reduce(function(a,p){return a+(p.boletas?p.boletas.length:0);},0), l:'Boletas registradas'},
     {n:fases.reduce(function(a,f){return a+f.partidos.length;},0), l:'Partidos totales'},
     {n:fases.reduce(function(a,f){return a+f.partidos.filter(function(p){return p.resultado;}).length;},0), l:'Resultados ingresados'},
   ];
@@ -544,7 +519,6 @@ function renderDashboard(){
   }
   document.getElementById('torneo-estado').innerHTML = est;
 }
-
 
 // ── EQUIPOS CLASIFICADOS MUNDIAL 2026
 var EQUIPOS_MUNDIAL = [
@@ -624,12 +598,12 @@ function renderNuevosPartidos(){
   document.getElementById('new-fase-npartidos').value = n;
 }
 
+// FIX 2: setear nombre y npartidos ANTES de llamar renderNuevosPartidos
 function precargar16avos(){
   var n = CRUCES_16AVOS.length;
-  document.getElementById('new-fase-npartidos').value = n;
   document.getElementById('new-fase-nombre').value = '16avos';
+  document.getElementById('new-fase-npartidos').value = n;
   renderNuevosPartidos();
-  // Ahora setear los valores en los selects
   setTimeout(function(){
     CRUCES_16AVOS.forEach(function(c, i){
       var selA = document.getElementById('nf-a-'+i);
@@ -640,6 +614,7 @@ function precargar16avos(){
     toast('✓ 32 cruces precargados — revisa y ajusta si es necesario');
   }, 100);
 }
+
 async function crearFase(){
   var nombre = document.getElementById('new-fase-nombre').value;
   var n = parseInt(document.getElementById('new-fase-npartidos').value)||1;
@@ -687,7 +662,7 @@ function renderFasesAdmin(){
         +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'
         +f.partidos.map(function(p){
           return '<div style="background:var(--s1);border:1px solid var(--bdr);border-radius:8px;padding:5px 10px;font-size:11px;font-family:\'Barlow Condensed\'">'
-            +p.equipoA+' vs '+p.equipoB
+            +(p.equipoA||'?')+' vs '+(p.equipoB||'?')
             +(p.resultado?'<span style="color:var(--green);margin-left:6px">→ '+p.resultado+'</span>':'')
             +'</div>';
         }).join('')
@@ -737,7 +712,7 @@ function renderResultPartidos(){
   if(!fase){document.getElementById('result-partidos-list').innerHTML='';return;}
   var h=fase.partidos.map(function(p){
     return '<div class="partido-admin">'
-      +'<div class="pa-header"><div class="pa-num">'+p.equipoA+' vs '+p.equipoB+'</div>'
+      +'<div class="pa-header"><div class="pa-num">'+(p.equipoA||'?')+' vs '+(p.equipoB||'?')+'</div>'
       +'<div class="pa-fecha">'+p.fecha+'</div></div>'
       +'<div class="pa-result">'
       +'<span style="color:var(--mut);font-size:12px;font-family:\'Barlow Condensed\'">Ganador:</span>'
@@ -759,10 +734,6 @@ async function setResult(faseId, partidoId, equipo){
 }
 
 // ── PARTICIPANTES
-async function renderParticipantesAsync(){
-  await loadPartsFromAPI();
-  renderParticipantes();
-}
 function renderParticipantes(){
   var parts=getParts();
   var tbody=document.getElementById('participantes-tbody');
@@ -774,7 +745,7 @@ function renderParticipantes(){
       +'<td style="color:var(--mut)">'+p.correo+'</td>'
       +'<td><span class="fase-pill">'+p.canal+'</span></td>'
       +'<td style="color:var(--dim);font-size:11px">'+new Date(p.fecha).toLocaleDateString('es-PE')+'</td>'
-      +'<td style="font-family:\'Barlow Condensed\';font-weight:700">'+p.boletas.length+'</td></tr>';
+      +'<td style="font-family:\'Barlow Condensed\';font-weight:700">'+(p.boletas?p.boletas.length:0)+'</td></tr>';
   }).join('');
 }
 
@@ -802,7 +773,7 @@ function renderRankingAdmin(){
       +'<td style="font-family:\'Barlow Condensed\';color:var(--red)">'+r.p.dni+'</td>'
       +'<td style="color:var(--mut)">'+r.p.correo+'</td>'
       +'<td class="pts-big">'+r.pts+'</td>'
-      +'<td>'+r.p.boletas.length+'</td>'
+      +'<td>'+(r.p.boletas?r.p.boletas.length:0)+'</td>'
       +'<td>'+prize+'</td></tr>';
   }).join('');
 }
@@ -812,7 +783,7 @@ function exportCSV(){
   var parts=getParts();
   if(!parts.length){toast('Sin participantes'); return;}
   var rows=[['DNI','Nombre','Teléfono','Correo','Canal','Fecha Registro','Boletas']];
-  parts.forEach(function(p){rows.push([p.dni,p.nombre,p.tel,p.correo,p.canal,new Date(p.fecha).toLocaleDateString('es-PE'),p.boletas.length]);});
+  parts.forEach(function(p){rows.push([p.dni,p.nombre,p.tel,p.correo,p.canal,new Date(p.fecha).toLocaleDateString('es-PE'),(p.boletas?p.boletas.length:0)]);});
   downloadCSV(rows,'participantes_powerade.csv');
   toast('✓ CSV exportado');
 }
@@ -820,7 +791,7 @@ function exportRankingCSV(){
   var parts=getParts();
   var ranked=parts.map(function(p){return{p:p,pts:calcPts(p)};}).sort(function(a,b){return b.pts-a.pts;});
   var rows=[['Posición','Nombre','DNI','Correo','Teléfono','Puntos','Boletas']];
-  ranked.forEach(function(r,i){rows.push([(i+1),r.p.nombre,r.p.dni,r.p.correo,r.p.tel,r.pts,r.p.boletas.length]);});
+  ranked.forEach(function(r,i){rows.push([(i+1),r.p.nombre,r.p.dni,r.p.correo,r.p.tel,r.pts,(r.p.boletas?r.p.boletas.length:0)]);});
   downloadCSV(rows,'ranking_powerade.csv');
   toast('✓ Ranking exportado');
 }
@@ -833,15 +804,16 @@ function downloadCSV(rows,filename){
 // ══════════════════════════════════════════════════════════════════════════
 // TOTEM APP
 // ══════════════════════════════════════════════════════════════════════════
-var T = { // totem state
+var T = {
   screen: 'inicio',
   dni: '', nombre: '', tel: '', correo: '',
   isNew: true,
   boleta: '', faseId: null,
-  picks: {}, // {partidoId: equipo}
+  picks: {},
   err: '',
   fotoOk: false,
-  fotoData: null
+  fotoData: null,
+  loading: false
 };
 
 function fotoCapturada(input){
@@ -896,8 +868,7 @@ function cerrarCamara(){
 }
 
 async function initTotem(){
-  T.screen='inicio'; T.err=''; T.fotoOk=false; T.fotoData=null;
-  // Cargar fase activa de la API
+  T.screen='inicio'; T.err=''; T.fotoOk=false; T.fotoData=null; T.loading=false;
   try {
     var d = await apiFetch('/fase-activa');
     _fasesCache = (d && d.fase) ? [normalizeFase(d.fase)] : [];
@@ -949,21 +920,17 @@ function tInicio(){
 }
 
 async function tStartNuevo(){
-  // Recargar fase activa desde la API
-  document.getElementById('scr').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:300px;flex-direction:column;gap:12px"><div style="color:var(--red);font-size:24px">⏳</div><div style="color:var(--muted);font-size:12px;font-family:var(--bc)">CARGANDO...</div></div>';
+  document.getElementById('scr').innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:300px;flex-direction:column;gap:12px"><div style="color:var(--red);font-size:24px">⏳</div><div style="color:var(--mut);font-size:12px;font-family:\'Barlow Condensed\'">CARGANDO...</div></div>';
   try {
     var d = await apiFetch('/fase-activa');
-    if(d && d.fase){
-      _fasesCache = [d.fase];
-    } else {
-      _fasesCache = [];
-    }
+    if(d && d.fase){ _fasesCache = [normalizeFase(d.fase)]; } else { _fasesCache = []; }
   } catch(e){ _fasesCache = []; }
   var fa=getFaseActiva();
   if(!fa){T.err='No hay fase activa';renderTotem();return;}
   T.isNew=true; T.faseId=fa.id; T.picks={}; T.boleta=''; T.fotoOk=false; T.fotoData=null;
   goT('boleta');
 }
+
 async function tStartReingreso(){
   try {
     var d = await apiFetch('/fase-activa');
@@ -980,7 +947,19 @@ function tBoleta(){
     +'<div class="sub">Ingresa el número de tu boleta de compra de Powerade y toma la foto.</div>'
     +'<div><div class="lbl">Número de boleta</div>'
     +'<input class="fld-input" id="t-boleta" value="'+T.boleta+'" placeholder="Ej: B-2026-001234" oninput="T.boleta=this.value"></div>'
-    +(T.fotoOk      ?'<div class="upload-box" style="border-color:var(--green);cursor:pointer" onclick="abrirCamara()">'        +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#2ECC71" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#2ECC71" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#2ECC71" stroke-width="1.5" stroke-linecap="round"/></svg>'        +'<div style="color:var(--green);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">✓ FOTO CAPTURADA</div>'        +'<img src="'+T.fotoData+'" style="width:100%;max-height:80px;object-fit:cover;border-radius:8px;margin-top:4px">'        +'<div class="sub" style="text-align:center;color:var(--green)">Toca para tomar otra</div>'      +'</div>'      :'<div class="upload-box" style="border-color:var(--red);border-style:solid;cursor:pointer" onclick="abrirCamara()">'        +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#CC0000" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#CC0000" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#CC0000" stroke-width="1.5" stroke-linecap="round"/></svg>'        +'<div style="color:var(--red);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">📷 TOMAR FOTO DE BOLETA</div>'        +'<div class="sub" style="text-align:center">Obligatorio · Toca para activar la cámara</div>'      +'</div>'    )
+    +(T.fotoOk
+      ?'<div class="upload-box" style="border-color:var(--green);cursor:pointer" onclick="abrirCamara()">'
+        +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#2ECC71" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#2ECC71" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#2ECC71" stroke-width="1.5" stroke-linecap="round"/></svg>'
+        +'<div style="color:var(--green);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">✓ FOTO CAPTURADA</div>'
+        +'<img src="'+T.fotoData+'" style="width:100%;max-height:80px;object-fit:cover;border-radius:8px;margin-top:4px">'
+        +'<div class="sub" style="text-align:center;color:var(--green)">Toca para tomar otra</div>'
+      +'</div>'
+      :'<div class="upload-box" style="border-color:var(--red);border-style:solid;cursor:pointer" onclick="abrirCamara()">'
+        +'<svg width="30" height="30" viewBox="0 0 30 30" fill="none"><rect x="3" y="7" width="24" height="17" rx="3" stroke="#CC0000" stroke-width="1.5"/><circle cx="15" cy="15.5" r="4.5" stroke="#CC0000" stroke-width="1.5"/><path d="M11 7 L11 4 L19 4 L19 7" stroke="#CC0000" stroke-width="1.5" stroke-linecap="round"/></svg>'
+        +'<div style="color:var(--red);font-size:12px;font-weight:700;font-family:\'Barlow Condensed\';letter-spacing:.5px">📷 TOMAR FOTO DE BOLETA</div>'
+        +'<div class="sub" style="text-align:center">Obligatorio · Toca para activar la cámara</div>'
+      +'</div>'
+    )
     +(T.err?'<div class="err-msg">'+T.err+'</div>':'')
     +'<div class="row-btns">'
     +'<div class="btn-r" style="flex:1" onclick="tBoletaNext()">Continuar →</div>'
@@ -988,7 +967,8 @@ function tBoleta(){
     +'</div></div>';
 }
 
-async function tBoletaNext(){
+// FIX 3: sin async innecesario
+function tBoletaNext(){
   T.boleta = (document.getElementById('t-boleta')||{}).value||T.boleta;
   if(!T.boleta.trim()){T.err='Ingresa el número de boleta';renderTotem();return;}
   if(!T.fotoOk){T.err='📷 Toma la foto de tu boleta para continuar';renderTotem();return;}
@@ -1019,9 +999,8 @@ function tRegistroNext(){
   T.correo=(document.getElementById('t-correo')||{}).value||T.correo;
   if(!T.nombre.trim()||!T.dni.trim()||!T.tel.trim()||!T.correo.trim()){T.err='Completa todos los campos';renderTotem();return;}
   if(!/^\d{7,8}$/.test(T.dni.trim())){T.err='DNI debe tener 7 u 8 dígitos';renderTotem();return;}
-  // Verificar DNI no duplicado en misma fase
   var parts=getParts();
-  var ya=parts.find(function(p){return p.dni===T.dni.trim()&&p.boletas.find(function(b){return b.fase_id===T.faseId;});});
+  var ya=parts.find(function(p){return p.dni===T.dni.trim()&&p.boletas&&p.boletas.find(function(b){return b.fase_id===T.faseId;});});
   if(ya){T.err='Este DNI ya participó en esta fase';renderTotem();return;}
   T.err=''; goT('apuestas');
 }
@@ -1035,18 +1014,20 @@ function tApuestas(){
     +'<div class="sub">Selecciona el ganador de cada partido</div>'
     +'<div class="tag2">1 pto por acierto</div></div>';
   fase.partidos.forEach(function(p){
-    var selA=T.picks[p.id]===p.equipoA, selB=T.picks[p.id]===p.equipoB;
+    var eA = p.equipoA || '—';
+    var eB = p.equipoB || '—';
+    var selA=T.picks[p.id]===eA, selB=T.picks[p.id]===eB;
     h+='<div class="partido">'
       +'<div class="ph">'+p.fecha+'</div>'
       +'<div class="teams">'
-      +'<div class="tb2 '+(selA?'sel':'')+'" onclick="tPick(\''+p.id+'\',\''+p.equipoA.replace(/'/g,"\\'")+'\')">'+(p.equipoA||'—')+'</div>'
+      +'<div class="tb2 '+(selA?'sel':'')+'" onclick="tPick(\''+p.id+'\',\''+eA.replace(/'/g,"\\'")+'\')">'+ eA +'</div>'
       +'<div class="vs">vs</div>'
-      +'<div class="tb2 '+(selB?'sel':'')+'" onclick="tPick(\''+p.id+'\',\''+p.equipoB.replace(/'/g,"\\'")+'\')">'+(p.equipoB||'—')+'</div>'
+      +'<div class="tb2 '+(selB?'sel':'')+'" onclick="tPick(\''+p.id+'\',\''+eB.replace(/'/g,"\\'")+'\')">'+ eB +'</div>'
       +'</div></div>';
   });
   var allPicked=fase.partidos.every(function(p){return T.picks[p.id];});
   h+=(T.err?'<div class="err-msg">'+T.err+'</div>':'');
-  h+='<div class="btn-r '+(allPicked?'':'')+'\"'+(allPicked?'':' style="opacity:.5"')+' onclick="tApuestasNext()">Registrar apuestas</div>';
+  h+='<div class="btn-r"'+(allPicked?'':' style="opacity:.5"')+' onclick="tApuestasNext()">Registrar apuestas</div>';
   h+='</div>';
   return h;
 }
@@ -1060,12 +1041,8 @@ async function tApuestasNext(){
   if(!fase) return;
   var allPicked=fase.partidos.every(function(p){return T.picks[p.id];});
   if(!allPicked){T.err='Selecciona el ganador de todos los partidos';renderTotem();return;}
-  
-  // Mostrar loading
   T.err=''; T.loading=true; renderTotem();
-  
   try {
-    // Enviar a la API
     var payload = {
       dni: T.dni,
       nombre: T.nombre,
@@ -1076,22 +1053,18 @@ async function tApuestasNext(){
       boleta: T.boleta,
       picks: JSON.stringify(T.picks)
     };
-    
-    // Si hay foto, usar FormData
     var res;
     if(T.fotoData){
       var formData = new FormData();
-      Object.entries(payload).forEach(([k,v]) => formData.append(k,v));
-      var blob = await fetch(T.fotoData).then(r=>r.blob());
+      Object.entries(payload).forEach(function(entry){ formData.append(entry[0], entry[1]); });
+      var blob = await fetch(T.fotoData).then(function(r){return r.blob();});
       formData.append('foto', blob, 'boleta.jpg');
-      var r = await fetch('/api/participar', {method:'POST', body:formData});
+      var r = await fetch(API+'/api/participar', {method:'POST', body:formData});
       res = await r.json();
     } else {
       res = await apiFetch('/participar', {method:'POST', body:JSON.stringify(payload)});
     }
-    
     if(res.error) throw new Error(res.error);
-    
     T.loading=false; T.err=''; goT('confirmacion'); setTimeout(launchConfetti, 300);
   } catch(e){
     T.loading=false; T.err=e.message; renderTotem();
@@ -1113,7 +1086,7 @@ function tConfirmacion(){
     +'<div class="ibox">'
     +'<div class="lbl">Tus apuestas</div>'
     +(fase?fase.partidos.map(function(p){
-      return '<div class="ap-r"><span class="ap-m">'+p.equipoA.split(' ').slice(1).join(' ')+' vs '+p.equipoB.split(' ').slice(1).join(' ')+'</span>'
+      return '<div class="ap-r"><span class="ap-m">'+(p.equipoA||'').split(' ').slice(1).join(' ')+' vs '+(p.equipoB||'').split(' ').slice(1).join(' ')+'</span>'
         +'<span class="ap-p pend">'+(T.picks[p.id]||'—')+'</span></div>';
     }).join(''):'')
     +'</div>'
@@ -1149,9 +1122,7 @@ function tRanking(){
         +'<div class="rpt">'+r.pts+'<span style="color:var(--dim);font-size:9px"> pts</span></div></div>';
     });
   }
-  h+='<div class="row-btns">'
-    +'<div class="btn-o" style="flex:1" onclick="goT(\'inicio\')">Volver al inicio</div>'
-    +'</div></div>';
+  h+='<div class="row-btns"><div class="btn-o" style="flex:1" onclick="goT(\'inicio\')">Volver al inicio</div></div></div>';
   return h;
 }
 
@@ -1184,7 +1155,6 @@ async function tReingresoLookup(){
     if(!found || !found.dni){
       T.err='DNI no encontrado — ¿es tu primera vez?'; T.notFound=true; renderTotem(); return;
     }
-    // Verificar que no haya ya apostado en esta fase
     var boletas = found.boletas || [];
     var yaApostó = boletas.find(function(b){return b.fase_id===T.faseId;});
     if(yaApostó){T.err='Ya registraste una boleta en esta fase';renderTotem();return;}
@@ -1199,30 +1169,24 @@ function tReingresoNext(){
   T.boleta=(document.getElementById('t-boleta-rein')||{}).value||T.boleta;
   if(!T.boleta.trim()){T.err='Ingresa el número de boleta';renderTotem();return;}
   var parts=getParts();
-  var usada=parts.find(function(p){return p.boletas.find(function(b){return b.numero===T.boleta.trim()&&b.fase_id===T.faseId;});});
+  var usada=parts.find(function(p){return p.boletas&&p.boletas.find(function(b){return b.numero===T.boleta.trim()&&b.fase_id===T.faseId;});});
   if(usada){T.err='Esta boleta ya fue registrada';renderTotem();return;}
   T.boleta=T.boleta.trim(); T.err=''; T.picks={}; goT('apuestas');
 }
 
-
 function poweradeLogo(){
   return '<div class="logo-img">'
     +'<svg width="160" height="38" viewBox="0 0 160 38" fill="none" xmlns="http://www.w3.org/2000/svg">'
-    // Fondo pill rojo oscuro
     +'<rect x="0" y="0" width="160" height="38" rx="6" fill="rgba(0,0,0,0.25)"/>'
-    // Rayo izquierdo decorativo
     +'<path d="M8 4 L4 18 L9 18 L5 34 L16 16 L11 16 L15 4Z" fill="#FFD700" opacity="0.9"/>'
-    // Texto POWERADE en blanco bold condensed
     +'<text x="24" y="27" font-family="Barlow Condensed,Arial Narrow,sans-serif" font-weight="900" font-size="22" fill="white" letter-spacing="2">POWERADE</text>'
-    // Rayo derecho decorativo
     +'<path d="M152 4 L148 18 L153 18 L149 34 L160 16 L155 16 L159 4Z" fill="#FFD700" opacity="0.9"/>'
-    // Línea inferior decorativa
     +'<rect x="24" y="30" width="112" height="2" rx="1" fill="rgba(255,215,0,0.5)"/>'
     +'</svg>'
     +'</div>';
 }
 
-// ── CONFETTI ENGINE ──────────────────────────────────────────────────────
+// ── CONFETTI ────────────────────────────────────────────────────────────
 var confettiPieces = [];
 var confettiRunning = false;
 var confettiCanvas, confettiCtx;
@@ -1263,10 +1227,7 @@ function animateConfetti(){
   confettiCtx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
   var alive = false;
   confettiPieces.forEach(function(p){
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.08;
-    p.rot += p.vrot;
+    p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.rot += p.vrot;
     if(p.y > confettiCanvas.height * 0.7) p.opacity -= 0.02;
     if(p.opacity > 0 && p.y < confettiCanvas.height + 20){
       alive = true;
@@ -1284,10 +1245,8 @@ function animateConfetti(){
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// INIT — routing por URL (?admin para panel)
+// 32 CRUCES PRECARGADOS 16AVOS MUNDIAL 2026
 // ══════════════════════════════════════════════════════════════════════════
-
-// 32 cruces precargados 16avos Mundial 2026
 var CRUCES_16AVOS = [
   ['🇦🇷 Argentina','🇦🇺 Australia'],['🇧🇷 Brasil','🇸🇳 Senegal'],
   ['🇫🇷 Francia','🇵🇱 Polonia'],['🇪🇸 España','🇨🇴 Colombia'],
@@ -1307,6 +1266,9 @@ var CRUCES_16AVOS = [
   ['🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra','🇰🇷 Corea del Sur'],['🇵🇹 Portugal','🇹🇳 Túnez'],
 ];
 
+// ══════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════
 async function initApp(){
   var isAdmin = window.location.search.indexOf('admin') >= 0
              || window.location.hash === '#admin';
@@ -1315,14 +1277,9 @@ async function initApp(){
     showAdminLogin();
   } else {
     showView('totem');
-    // Cargar fases desde la API antes de mostrar el totem
     try {
       var d = await apiFetch('/fase-activa');
-      if(d && d.fase){
-        _fasesCache = [d.fase];
-      } else {
-        _fasesCache = [];
-      }
+      if(d && d.fase){ _fasesCache = [normalizeFase(d.fase)]; } else { _fasesCache = []; }
     } catch(e){ _fasesCache = []; }
     initTotem();
   }
