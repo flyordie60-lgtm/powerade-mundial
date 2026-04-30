@@ -1,6 +1,70 @@
-const express=require('express'),router=express.Router(),{pool}=require('../db'),cloudinary=require('cloudinary').v2,multer=require('multer'),upload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024}});
-router.get('/fase-activa',async(req,res)=>{try{const{rows}=await pool.query("SELECT f.*,json_agg(p ORDER BY p.orden) FILTER(WHERE p.id IS NOT NULL) as partidos FROM fases f LEFT JOIN partidos p ON p.fase_id=f.id WHERE f.activa=true AND f.cerrada=false GROUP BY f.id");res.json({fase:rows[0]||null});}catch(e){res.status(500).json({error:e.message});}});
-router.post('/participar',upload.single('foto'),async(req,res)=>{const{dni,nombre,telefono,correo,canal,numero_boleta,fase_id,apuestas}=req.body,client=await pool.connect();try{await client.query('BEGIN');const bd=await client.query('SELECT id FROM boletas WHERE numero=$1',[numero_boleta]);if(bd.rows.length)throw new Error('Boleta ya registrada');const df=await client.query('SELECT id FROM boletas WHERE dni=$1 AND fase_id=$2',[dni,fase_id]);if(df.rows.length)throw new Error('DNI ya participó en esta fase');await client.query("INSERT INTO participantes(dni,nombre,telefono,correo,canal)VALUES($1,$2,$3,$4,$5)ON CONFLICT(dni)DO UPDATE SET correo=EXCLUDED.correo",[dni,nombre,telefono,correo,canal||'totem']);let foto_url=null;if(req.file){const result=await new Promise((resolve,reject)=>{cloudinary.uploader.upload_stream({folder:'powerade_boletas',public_id:'boleta_'+numero_boleta},(err,r)=>err?reject(err):resolve(r)).end(req.file.buffer)});foto_url=result.secure_url;}await client.query('INSERT INTO boletas(numero,dni,fase_id,foto_url)VALUES($1,$2,$3,$4)',[numero_boleta,dni,fase_id,foto_url]);const picks=JSON.parse(apuestas||'{}');for(const[pid,pred]of Object.entries(picks)){await client.query("INSERT INTO apuestas(dni,partido_id,prediccion)VALUES($1,$2,$3)ON CONFLICT(dni,partido_id)DO UPDATE SET prediccion=EXCLUDED.prediccion",[dni,pid,pred]);}await client.query('COMMIT');res.json({ok:true});}catch(e){await client.query('ROLLBACK');res.status(400).json({error:e.message});}finally{client.release();}});
-router.get('/participante/:dni',async(req,res)=>{try{const{rows}=await pool.query('SELECT * FROM participantes WHERE dni=$1',[req.params.dni]);if(!rows.length)return res.status(404).json({error:'DNI no encontrado'});const pts=await pool.query('SELECT COALESCE(SUM(puntos),0) as total FROM apuestas WHERE dni=$1',[req.params.dni]);const bol=await pool.query('SELECT fase_id FROM boletas WHERE dni=$1',[req.params.dni]);res.json({participante:rows[0],puntos:+pts.rows[0].total,boletas:bol.rows});}catch(e){res.status(500).json({error:e.message});}});
-router.get('/ranking',async(req,res)=>{try{const{rows}=await pool.query("SELECT p.dni,p.nombre,p.correo,COALESCE(SUM(a.puntos),0) as puntos,COUNT(DISTINCT b.fase_id) as fases FROM participantes p LEFT JOIN apuestas a ON a.dni=p.dni LEFT JOIN boletas b ON b.dni=p.dni GROUP BY p.dni,p.nombre,p.correo ORDER BY puntos DESC LIMIT 50");res.json({ranking:rows});}catch(e){res.status(500).json({error:e.message});}});
-module.exports=router;
+const express = require('express');
+const router = express.Router();
+const { pool } = require('../db');
+const cloudinary = require('cloudinary').v2;
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// GET /api/fase-activa
+router.get('/fase-activa', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM fases WHERE activa=true AND cerrada=false LIMIT 1');
+    if (!rows.length) return res.json({ fase: null });
+    const f = rows[0];
+    f.partidos = f.partidos || [];
+    res.json({ fase: f });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/participar
+router.post('/participar', upload.single('foto'), async (req, res) => {
+  const { dni, nombre, tel, correo, canal, faseId, boleta, picks } = req.body;
+  if (!dni || !nombre || !faseId) return res.status(400).json({ error: 'Faltan datos' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let foto_url = null;
+    if (req.file) {
+      const r = await new Promise((resolve, reject) => {
+        cloudinary.uploader.upload_stream({ folder: 'powerade_boletas' }, (e, r) => e ? reject(e) : resolve(r)).end(req.file.buffer);
+      });
+      foto_url = r.secure_url;
+    }
+    const bolObj = { fase_id: faseId, numero: boleta, foto_url, fecha: Date.now() };
+    const picksObj = typeof picks === 'string' ? JSON.parse(picks) : picks;
+    const exist = await client.query('SELECT * FROM participantes WHERE dni=$1', [dni]);
+    if (exist.rows.length) {
+      const p = exist.rows[0];
+      const newBol = [...p.boletas, bolObj];
+      const newApu = { ...p.apuestas, [faseId]: picksObj };
+      await client.query('UPDATE participantes SET boletas=$1,apuestas=$2 WHERE dni=$3', [JSON.stringify(newBol), JSON.stringify(newApu), dni]);
+    } else {
+      await client.query('INSERT INTO participantes(dni,nombre,tel,correo,canal,fecha,boletas,apuestas) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [dni,nombre,tel,correo,canal||'totem',Date.now(),JSON.stringify([bolObj]),JSON.stringify({[faseId]:picksObj})]);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, foto_url });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: e.message });
+  } finally { client.release(); }
+});
+
+// GET /api/participante/:dni
+router.get('/participante/:dni', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM participantes WHERE dni=$1', [req.params.dni]);
+    if (!rows.length) return res.status(404).json({ error: 'DNI no encontrado' });
+    res.json({ participante: rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ranking
+router.get('/ranking', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT * FROM participantes ORDER BY fecha DESC`);
+    const fases = await pool.query('SELECT * FROM fases ORDER BY created_at');
+    res.json({ ranking: rows, fases: fases.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+module.exports = router;
