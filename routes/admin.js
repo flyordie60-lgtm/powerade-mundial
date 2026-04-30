@@ -129,4 +129,22 @@ router.get('/stats', authAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// POST /admin/verificar-boleta
+router.post('/verificar-boleta', authAdmin, async (req, res) => {
+  try {
+    const { dni, numeroBoleta, estado } = req.body;
+    if (!dni || !numeroBoleta || !estado) return res.status(400).json({ error: 'Faltan campos' });
+    const { rows } = await pool.query('SELECT * FROM participantes WHERE dni=$1', [dni]);
+    if (!rows.length) return res.status(404).json({ error: 'Participante no encontrado' });
+    const part = rows[0];
+    const boletas = (part.boletas || []).map(function(b) {
+      if (b.numero === numeroBoleta) b.estado = estado;
+      return b;
+    });
+    await pool.query('UPDATE participantes SET boletas=$1 WHERE dni=$2', [JSON.stringify(boletas), dni]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
