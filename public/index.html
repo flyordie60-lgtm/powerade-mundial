@@ -385,15 +385,22 @@ var _partsCache = null;
 function getFases(){ return _fasesCache || []; }
 function getParts(){ return _partsCache || []; }
 
+function normalizeFase(f){
+  // Convierte equipo_a/equipo_b a equipoA/equipoB
+  if(f.partidos) f.partidos = f.partidos.map(function(p){
+    p.equipoA = p.equipoA || p.equipo_a || '';
+    p.equipoB = p.equipoB || p.equipo_b || '';
+    return p;
+  });
+  return f;
+}
+
 async function loadFasesFromAPI(){
   var d = await apiFetch('/admin/fases');
-  if(Array.isArray(d)){
-    _fasesCache = d;
-  } else if(d && Array.isArray(d.fases)){
-    _fasesCache = d.fases;
-  } else {
-    _fasesCache = [];
-  }
+  var fases = [];
+  if(Array.isArray(d)) fases = d;
+  else if(d && Array.isArray(d.fases)) fases = d.fases;
+  _fasesCache = fases.map(normalizeFase);
   return _fasesCache;
 }
 
@@ -893,7 +900,7 @@ async function initTotem(){
   // Cargar fase activa de la API
   try {
     var d = await apiFetch('/fase-activa');
-    _fasesCache = (d && d.fase) ? [d.fase] : [];
+    _fasesCache = (d && d.fase) ? [normalizeFase(d.fase)] : [];
   } catch(e){ _fasesCache = []; }
   renderTotem();
 }
@@ -960,7 +967,7 @@ async function tStartNuevo(){
 async function tStartReingreso(){
   try {
     var d = await apiFetch('/fase-activa');
-    if(d && d.fase){ _fasesCache = [d.fase]; } else { _fasesCache = []; }
+    if(d && d.fase){ _fasesCache = [normalizeFase(d.fase)]; } else { _fasesCache = []; }
   } catch(e){ _fasesCache = []; }
   var fa=getFaseActiva();
   if(!fa){T.err='No hay fase activa';renderTotem();return;}
