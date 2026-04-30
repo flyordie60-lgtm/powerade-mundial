@@ -38,12 +38,12 @@ router.get('/ranking', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/participar — acepta tel o telefono
+// POST /api/participar
 router.post('/participar', upload.single('foto'), async (req, res) => {
   try {
     const { dni, nombre, canal, faseId, boleta, picks } = req.body;
-    // Acepta tanto "tel" como "telefono"
-    const tel = req.body.tel || req.body.telefono || '';
+    // Acepta "tel", "telefono" o cualquier variante
+    const telefono = req.body.telefono || req.body.tel || '';
     const correo = req.body.correo || '';
 
     if (!dni || !nombre || !faseId || !boleta) {
@@ -69,27 +69,22 @@ router.post('/participar', upload.single('foto'), async (req, res) => {
     const { rows: existing } = await pool.query('SELECT * FROM participantes WHERE dni=$1', [dni]);
 
     if (existing.length) {
-      // Participante existente — agregar boleta y apuestas de esta fase
       const part = existing[0];
       const boletas = part.boletas || [];
       const apuestas = part.apuestas || {};
-
       boletas.push({ numero: boleta, fase_id: faseId, foto: fotoUrl, fecha: Date.now() });
       apuestas[faseId] = parsedPicks;
-
       await pool.query(
         'UPDATE participantes SET boletas=$1, apuestas=$2 WHERE dni=$3',
         [JSON.stringify(boletas), JSON.stringify(apuestas), dni]
       );
     } else {
-      // Nuevo participante
       const boletas = [{ numero: boleta, fase_id: faseId, foto: fotoUrl, fecha: Date.now() }];
       const apuestas = { [faseId]: parsedPicks };
-
       await pool.query(
-        `INSERT INTO participantes (dni, nombre, tel, correo, canal, fecha, boletas, apuestas)
+        `INSERT INTO participantes (dni, nombre, telefono, correo, canal, fecha, boletas, apuestas)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [dni, nombre, tel, correo, canal || 'totem', Date.now(), JSON.stringify(boletas), JSON.stringify(apuestas)]
+        [dni, nombre, telefono, correo, canal || 'totem', Date.now(), JSON.stringify(boletas), JSON.stringify(apuestas)]
       );
     }
 
