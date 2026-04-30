@@ -488,6 +488,7 @@ async function adminTab(tab){
   document.getElementById('sec-'+tab).classList.add('act');
   await loadFasesFromAPI();
   if(tab==='participantes'||tab==='ranking'||tab==='verificacion') await loadPartsFromAPI();
+  if(tab==='verificacion') await loadFasesFromAPI();
   renderAdmin(tab);
 }
 
@@ -1280,7 +1281,9 @@ var CRUCES_16AVOS = [
 
 // ── VERIFICACIÓN DE BOLETAS
 var _verifFiltro = 'todas';
-function renderVerificacion(){
+async function renderVerificacion(){
+  if(!getParts().length) await loadPartsFromAPI();
+  if(!getFases().length) await loadFasesFromAPI();
   var parts=getParts();
   var boletas=[];
   parts.forEach(function(p){
