@@ -881,9 +881,7 @@ function tInicio(){
     +'<div class="big-title">Apuesta y gana<br>con Powerade</div>'
     +'<div class="sub" style="text-align:center">Compra tu six pack, registra tu boleta<br>y predice los partidos del Mundial</div>'
     +'</div>'
-    +(fa?''
-      +'<div class="no-fases"><div style="color:var(--mut);font-size:13px;text-align:center">No hay una fase activa en este momento.<br>Vuelve pronto.</div></div>'
-      :'')
+    +(!fa?'<div class="no-fases"><div style="color:var(--mut);font-size:13px;text-align:center">No hay una fase activa en este momento.<br>Vuelve pronto.</div></div>':'')
     +'<div style="display:flex;flex-direction:column;gap:8px">'
     +'<div class="strow"><div class="stnum">1</div><div class="sub"><b style="color:#fff">Compra</b> un six pack de Powerade y guarda tu boleta</div></div>'
     +'<div class="strow"><div class="stnum">2</div><div class="sub"><b style="color:#fff">Registra</b> el número de boleta y tus datos</div></div>'
