@@ -21,7 +21,7 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS participantes (
         dni VARCHAR(20) PRIMARY KEY,
         nombre VARCHAR(200) NOT NULL,
-        tel VARCHAR(50),
+        telefono VARCHAR(50),
         correo VARCHAR(200),
         canal VARCHAR(50) DEFAULT 'totem',
         fecha BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
@@ -29,7 +29,9 @@ async function initDB() {
         apuestas JSONB DEFAULT '{}'
       );
     `);
-    // Migraciones — agrega columnas faltantes en DB existente
+    // Migraciones — compatibilidad con DB existente
+    await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS telefono VARCHAR(50)`);
+    await client.query(`ALTER TABLE participantes ALTER COLUMN telefono DROP NOT NULL`);
     await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS tel VARCHAR(50)`);
     await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS correo VARCHAR(200)`);
     await client.query(`ALTER TABLE participantes ADD COLUMN IF NOT EXISTS canal VARCHAR(50) DEFAULT 'totem'`);
